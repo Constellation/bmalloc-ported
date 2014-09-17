@@ -8,7 +8,29 @@ if(COMMAND cmake_policy)
     cmake_policy(SET CMP0015 NEW)  # convert relative link paths to absolute
 endif(COMMAND cmake_policy)
 
+# We can specify Release / Debug / None
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+
+add_definitions(
+    "-Wall"
+    "-Wextra"
+    "-Wno-unused-parameter"
+    "-Wwrite-strings"
+    "-Wreturn-type"
+    "-Wpointer-arith"
+    "-Wno-unused-variable"
+    "-Wwrite-strings"
+    "-Wno-long-long"
+    "-Wno-missing-field-initializers"
+    "-g3"
+)
+
 find_package(Threads)
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -22,6 +44,6 @@ file(GLOB src "bmalloc/*.cpp")
 add_library(bmalloc STATIC ${src})
 
 include_directories(bmalloc)
-file(GLOB test_src "test/*.cpp")
+file(GLOB test_src "test/TestVector.cpp")
 add_executable(test ${test_src})
 target_link_libraries(test ${CMAKE_THREAD_LIBS_INIT} bmalloc)
