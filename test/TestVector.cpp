@@ -23,17 +23,20 @@
 */
 
 #include <vector>
-#include <iostream>
+#include <gtest/gtest.h>
+
 #include <bmalloc.h>
 #include "BAllocator.h"
 
-int main(int argc, char** argv) {
-    void* ptr = bmalloc::api::malloc(1024);
+TEST(TestVector, PushBack) {
     std::vector<int, BAllocator<int>> vec;
 
     for (int i = 0; i < 100000; ++i) {
         vec.push_back(i);
     }
-    std::cout << vec.size() << std::endl;
-    return 0;
+    EXPECT_EQ(100000u, vec.size());
+
+    for (int i = 0; i < 100000; ++i) {
+        EXPECT_EQ(i, vec[i]) << i;
+    }
 }

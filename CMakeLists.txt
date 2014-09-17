@@ -43,7 +43,6 @@ endif()
 file(GLOB src "bmalloc/*.cpp")
 add_library(bmalloc STATIC ${src})
 
-include_directories(bmalloc)
-file(GLOB test_src "test/TestVector.cpp")
-add_executable(test ${test_src})
-target_link_libraries(test ${CMAKE_THREAD_LIBS_INIT} bmalloc)
+set(BMALLOC_LIBS ${CMAKE_THREAD_LIBS_INIT} bmalloc)
+
+add_subdirectory(test)
