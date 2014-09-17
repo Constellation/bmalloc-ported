@@ -40,9 +40,9 @@ int main(int argc, char** argv) {
 static void BM_memcpy(benchmark::State& state) {
   char* src = new char[state.range_x()]; char* dst = new char[state.range_x()];
   memset(src, 'x', state.range_x());
-  while (state.KeepRunning()) {
+  while (state.KeepRunning())
     memcpy(dst, src, state.range_x());
-  SetBenchmarkBytesProcessed(int64_t_t(state.iterations) * int64(state.range_x()));
+  state.SetBytesProcessed(int64_t_t(state.iterations) * int64(state.range_x()));
   delete[] src; delete[] dst;
 }
 BENCHMARK(BM_memcpy)->Arg(8)->Arg(64)->Arg(512)->Arg(1<<10)->Arg(8<<10);
@@ -139,8 +139,8 @@ BENCHMARK(BM_MultiThreaded)->Threads(4);
 
 #include <functional>
 #include <memory>
-#include <pthread.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "macros.h"
@@ -178,6 +178,7 @@ void UseRealTime();
 
 namespace internal {
 class Benchmark;
+class BenchmarkFamilies;
 }
 
 // State is passed to a running Benchmark and contains state for the
@@ -262,7 +263,7 @@ class State {
   // BenchmarkInstance
   SharedState* shared_;
 
-  pthread_t thread_;
+  std::thread thread_;
 
   // Custom label set by the user.
   std::string label_;
@@ -275,8 +276,10 @@ class State {
   double start_time_;
   int64_t stop_time_micros_;
 
-  double start_pause_;
-  double pause_time_;
+  double start_pause_cpu_;
+  double pause_cpu_time_;
+  double start_pause_real_;
+  double pause_real_time_;
 
   // Total number of iterations for all finished runs.
   int64_t total_iterations_;
@@ -444,15 +447,12 @@ class Benchmark {
   // Used inside the benchmark implementation
   struct Instance;
 
-  // Extract the list of benchmark instances that match the specified
-  // regular expression.
-  static void FindBenchmarks(const std::string& re,
-                             std::vector<Instance>* benchmarks);
-
   // Measure the overhead of an empty benchmark to subtract later.
   static void MeasureOverhead();
 
  private:
+  friend class BenchmarkFamilies;
+
   std::vector<Benchmark::Instance> CreateBenchmarkInstances(int rangeXindex,
                                                             int rangeYindex);
 

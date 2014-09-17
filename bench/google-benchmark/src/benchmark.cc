@@ -16,27 +16,22 @@
 #include "benchmark/macros.h"
 #include "colorprint.h"
 #include "commandlineflags.h"
-#include "mutex_lock.h"
+#include "re.h"
 #include "sleep.h"
 #include "stat.h"
 #include "sysinfo.h"
 #include "walltime.h"
 
 #include <sys/time.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <string.h>
-
-#if defined OS_FREEBSD
-#include <gnuregex.h>
-#else
-#include <regex.h>
-#endif
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <sstream>
 
 DEFINE_string(benchmark_filter, ".",
@@ -189,13 +184,9 @@ inline std::string HumanReadableNumber(double n) {
 // For non-dense Range, intermediate values are powers of kRangeMultiplier.
 static const int kRangeMultiplier = 8;
 
-// List of all registered benchmarks.  Note that each registered
-// benchmark identifies a family of related benchmarks to run.
-static pthread_mutex_t benchmark_mutex;
-static std::vector<internal::Benchmark*>* families = NULL;
-
-pthread_mutex_t starting_mutex;
-pthread_cond_t starting_cv;
+static std::mutex benchmark_mutex;
+std::mutex starting_mutex;
+std::condition_variable starting_cv;
 
 bool running_benchmark = false;
 
@@ -257,9 +248,9 @@ void ComputeStats(const std::vector<BenchmarkReporter::Run>& reports,
        it != reports.end(); ++it) {
     CHECK_EQ(reports[0].benchmark_name, it->benchmark_name);
     real_accumulated_time_stat +=
-        Stat1_d(it->real_accumulated_time, it->iterations);
+        Stat1_d(it->real_accumulated_time / it->iterations, it->iterations);
     cpu_accumulated_time_stat +=
-        Stat1_d(it->cpu_accumulated_time, it->iterations);
+        Stat1_d(it->cpu_accumulated_time / it->iterations, it->iterations);
     items_per_second_stat += Stat1_d(it->items_per_second, it->iterations);
     bytes_per_second_stat += Stat1_d(it->bytes_per_second, it->iterations);
     iterations_stat += Stat1_d(it->iterations, it->iterations);
@@ -267,11 +258,15 @@ void ComputeStats(const std::vector<BenchmarkReporter::Run>& reports,
         Stat1MinMax_d(it->max_heapbytes_used, it->iterations);
   }
 
-  // Get the data from the accumulator to BenchmarkRunData's.
+  // Get the data from the accumulator to BenchmarkRunData's.  In the
+  // computations below we must multiply by the number of iterations since
+  // PrintRunData will divide by it.
   mean_data->benchmark_name = reports[0].benchmark_name + "_mean";
   mean_data->iterations = iterations_stat.Mean();
-  mean_data->real_accumulated_time = real_accumulated_time_stat.Mean();
-  mean_data->cpu_accumulated_time = cpu_accumulated_time_stat.Mean();
+  mean_data->real_accumulated_time = real_accumulated_time_stat.Mean() *
+                                     mean_data->iterations;
+  mean_data->cpu_accumulated_time = cpu_accumulated_time_stat.Mean() *
+                                    mean_data->iterations;
   mean_data->bytes_per_second = bytes_per_second_stat.Mean();
   mean_data->items_per_second = items_per_second_stat.Mean();
   mean_data->max_heapbytes_used = max_heapbytes_used_stat.max();
@@ -288,8 +283,20 @@ void ComputeStats(const std::vector<BenchmarkReporter::Run>& reports,
   stddev_data->benchmark_name = reports[0].benchmark_name + "_stddev";
   stddev_data->report_label = mean_data->report_label;
   stddev_data->iterations = iterations_stat.StdDev();
-  stddev_data->real_accumulated_time = real_accumulated_time_stat.StdDev();
-  stddev_data->cpu_accumulated_time = cpu_accumulated_time_stat.StdDev();
+  // The value of iterations_stat.StdDev() above may be 0 if all the repetitions
+  // have the same number of iterations.  Blindly multiplying by 0 in the
+  // computation of real/cpu_accumulated_time below would lead to 0/0 in
+  // PrintRunData.  So we skip the multiplication in this case and PrintRunData
+  // skips the division.
+  if (stddev_data->iterations == 0) {
+    stddev_data->real_accumulated_time = real_accumulated_time_stat.StdDev();
+    stddev_data->cpu_accumulated_time = cpu_accumulated_time_stat.StdDev();
+  } else {
+    stddev_data->real_accumulated_time = real_accumulated_time_stat.StdDev() *
+                                         stddev_data->iterations;
+    stddev_data->cpu_accumulated_time = cpu_accumulated_time_stat.StdDev() *
+                                        stddev_data->iterations;
+  }
   stddev_data->bytes_per_second = bytes_per_second_stat.StdDev();
   stddev_data->items_per_second = items_per_second_stat.StdDev();
   stddev_data->max_heapbytes_used = max_heapbytes_used_stat.StdDev();
@@ -297,6 +304,112 @@ void ComputeStats(const std::vector<BenchmarkReporter::Run>& reports,
 }  // namespace
 
 namespace internal {
+
+// Class for managing registered benchmarks.  Note that each registered
+// benchmark identifies a family of related benchmarks to run.
+class BenchmarkFamilies {
+ public:
+  static BenchmarkFamilies* GetInstance();
+
+  // Registers a benchmark family and returns the index assigned to it.
+  int AddBenchmark(Benchmark* family);
+
+  // Unregisters a family at the given index.
+  void RemoveBenchmark(int index);
+
+  // Extract the list of benchmark instances that match the specified
+  // regular expression.
+  void FindBenchmarks(const std::string& re,
+                      std::vector<Benchmark::Instance>* benchmarks);
+ private:
+  BenchmarkFamilies();
+  ~BenchmarkFamilies();
+
+  std::vector<Benchmark*> families_;
+};
+
+BenchmarkFamilies* BenchmarkFamilies::GetInstance() {
+  static BenchmarkFamilies instance;
+  return &instance;
+}
+
+BenchmarkFamilies::BenchmarkFamilies() { }
+
+BenchmarkFamilies::~BenchmarkFamilies() {
+  for (internal::Benchmark* family : families_) {
+    delete family;
+  }
+}
+
+int BenchmarkFamilies::AddBenchmark(Benchmark* family) {
+  std::lock_guard<std::mutex> l(benchmark_mutex);
+  // This loop attempts to reuse an entry that was previously removed to avoid
+  // unncessary growth of the vector.
+  for (size_t index = 0; index < families_.size(); ++index) {
+    if (families_[index] == nullptr) {
+      families_[index] = family;
+      return index;
+    }
+  }
+  int index = families_.size();
+  families_.push_back(family);
+  return index;
+}
+
+void BenchmarkFamilies::RemoveBenchmark(int index) {
+  // FIXME: Already locked.
+  // std::lock_guard<std::mutex> l(benchmark_mutex);
+  families_[index] = NULL;
+  // Don't shrink families_ here, we might be called by the destructor of
+  // BenchmarkFamilies which iterates over the vector.
+}
+
+void BenchmarkFamilies::FindBenchmarks(
+    const std::string& spec,
+    std::vector<Benchmark::Instance>* benchmarks) {
+  // Make regular expression out of command-line flag
+  Regex re;
+  std::string re_error;
+  if (!re.Init(spec, &re_error)) {
+    std::cerr << "Could not compile benchmark re: " << re_error << std::endl;
+    return;
+  }
+
+  std::lock_guard<std::mutex> l(benchmark_mutex);
+  for (internal::Benchmark* family : families_) {
+    if (family == nullptr) continue;  // Family was deleted
+
+    // Match against filter.
+    if (!re.Match(family->name_)) {
+#ifdef DEBUG
+      std::cout << "Skipping " << family->name_ << "\n";
+#endif
+      continue;
+    }
+
+    std::vector<Benchmark::Instance> instances;
+    if (family->rangeX_.empty() && family->rangeY_.empty()) {
+      instances = family->CreateBenchmarkInstances(
+        Benchmark::kNoRange, Benchmark::kNoRange);
+      std::copy(instances.begin(), instances.end(),
+                std::back_inserter(*benchmarks));
+    } else if (family->rangeY_.empty()) {
+      for (size_t x = 0; x < family->rangeX_.size(); ++x) {
+        instances = family->CreateBenchmarkInstances(x, Benchmark::kNoRange);
+        std::copy(instances.begin(), instances.end(),
+                  std::back_inserter(*benchmarks));
+      }
+    } else {
+      for (size_t x = 0; x < family->rangeX_.size(); ++x) {
+        for (size_t y = 0; y < family->rangeY_.size(); ++y) {
+          instances = family->CreateBenchmarkInstances(x, y);
+          std::copy(instances.begin(), instances.end(),
+                    std::back_inserter(*benchmarks));
+        }
+      }
+    }
+  }
+}
 
 std::string ConsoleReporter::PrintMemoryUsage(double bytes) const {
   if (!get_memory_usage || bytes < 0.0) return "";
@@ -374,11 +487,17 @@ void ConsoleReporter::PrintRunData(const BenchmarkReporter::Run& result) const {
   ColorPrintf(COLOR_DEFAULT, "%s", Prefix());
   ColorPrintf(COLOR_GREEN, "%-*s ",
               name_field_width_, result.benchmark_name.c_str());
-  ColorPrintf(COLOR_YELLOW, "%10.0f %10.0f ",
-              (result.real_accumulated_time * 1e9) /
-                  (static_cast<double>(result.iterations)),
-              (result.cpu_accumulated_time * 1e9) /
-                  (static_cast<double>(result.iterations)));
+  if (result.iterations == 0) {
+    ColorPrintf(COLOR_YELLOW, "%10.0f %10.0f ",
+                result.real_accumulated_time * 1e9,
+                result.cpu_accumulated_time * 1e9);
+  } else {
+    ColorPrintf(COLOR_YELLOW, "%10.0f %10.0f ",
+                (result.real_accumulated_time * 1e9) /
+                    (static_cast<double>(result.iterations)),
+                (result.cpu_accumulated_time * 1e9) /
+                    (static_cast<double>(result.iterations)));
+  }
   ColorPrintf(COLOR_CYAN, "%10lld", result.iterations);
   ColorPrintf(COLOR_DEFAULT, "%*s %*s %s %s\n",
               13, rate.c_str(),
@@ -446,21 +565,16 @@ class State::FastClock {
   explicit FastClock(Type type)
       : type_(type),
         approx_time_(NowMicros()),
-        bg_done_(false) {
-    pthread_cond_init(&bg_cond_, nullptr);
-    pthread_mutex_init(&bg_mutex_, nullptr);
-    pthread_create(&bg_, NULL, &BGThreadWrapper, this);
-  }
+        bg_done_(false),
+        bg_(BGThreadWrapper, this) { }
 
   ~FastClock() {
     {
-      mutex_lock l(&bg_mutex_);
+      std::unique_lock<std::mutex> l(bg_mutex_);
       bg_done_ = true;
-      pthread_cond_signal(&bg_cond_);
+      bg_cond_.notify_one();
     }
-    pthread_join(bg_, NULL);
-    pthread_mutex_destroy(&bg_mutex_);
-    pthread_cond_destroy(&bg_cond_);
+    bg_.join();
   }
 
   // Returns true if the current time is guaranteed to be past "when_micros".
@@ -487,6 +601,7 @@ class State::FastClock {
   // function starts running - see UseRealTime).
   void InitType(Type type) {
     type_ = type;
+    std::lock_guard<std::mutex> l(bg_mutex_);
     std::atomic_store(&approx_time_, NowMicros());
   }
 
@@ -494,10 +609,9 @@ class State::FastClock {
   Type type_;
   std::atomic<int64_t> approx_time_;  // Last time measurement taken by bg_
   bool bg_done_;  // This is used to signal background thread to exit
-  pthread_t bg_;  // Background thread that updates last_time_ once every ms
-
-  pthread_mutex_t bg_mutex_;
-  pthread_cond_t bg_cond_;
+  std::mutex bg_mutex_;
+  std::condition_variable bg_cond_;
+  std::thread bg_;  // Background thread that updates last_time_ once every ms
 
   static void* BGThreadWrapper(void* that) {
     ((FastClock*)that)->BGThread();
@@ -505,23 +619,11 @@ class State::FastClock {
   }
 
   void BGThread() {
-    mutex_lock l(&bg_mutex_);
+    std::unique_lock<std::mutex> l(bg_mutex_);
     while (!bg_done_)
     {
-      struct timeval tv;
-      gettimeofday(&tv, nullptr);
-
       // Set timeout to 1 ms.
-      uint32_t const timeout = 1000;
-      struct timespec ts;
-      ts.tv_sec = tv.tv_sec + (timeout / kNumMicrosPerSecond);
-      ts.tv_nsec =
-          (tv.tv_usec + (timeout % kNumMicrosPerSecond)) * kNumNanosPerMicro;
-      ts.tv_sec += ts.tv_nsec / kNumNanosPerSecond;
-      ts.tv_nsec %= kNumNanosPerSecond;
-
-      pthread_cond_timedwait(&bg_cond_, &bg_mutex_, &ts);
-
+      bg_cond_.wait_for(l, std::chrono::milliseconds(1));
       std::atomic_store(&approx_time_, NowMicros());
     }
   }
@@ -574,9 +676,11 @@ struct Benchmark::Instance {
 
 struct State::SharedState {
   const internal::Benchmark::Instance* instance;
-  pthread_mutex_t mu;
+  std::mutex mu;
+  std::condition_variable cond;
   int starting;  // Number of threads that have entered STARTING state
   int stopping;  // Number of threads that have entered STOPPING state
+  int exited;    // Number of threads that have complete exited
   int threads;   // Number of total threads that are running concurrently
   ThreadStats stats;
   std::vector<BenchmarkReporter::Run> runs;  // accumulated runs
@@ -586,11 +690,9 @@ struct State::SharedState {
       : instance(b),
         starting(0),
         stopping(0),
-        threads(b == nullptr ? 1 : b->threads) {
-    pthread_mutex_init(&mu, nullptr);
-  }
+        exited(0),
+        threads(b == nullptr ? 1 : b->threads) { }
 
-  ~SharedState() { pthread_mutex_destroy(&mu); }
   DISALLOW_COPY_AND_ASSIGN(SharedState)
 };
 
@@ -598,22 +700,15 @@ namespace internal {
 
 Benchmark::Benchmark(const char* name, BenchmarkFunction f)
     : name_(name), function_(f) {
-  mutex_lock l(&benchmark_mutex);
-  if (families == nullptr) families = new std::vector<Benchmark*>();
-  registration_index_ = families->size();
-  families->push_back(this);
+  registration_index_ = BenchmarkFamilies::GetInstance()->AddBenchmark(this);
 }
 
 Benchmark::~Benchmark() {
-  mutex_lock l(&benchmark_mutex);
-  CHECK((*families)[registration_index_] == this);
-  (*families)[registration_index_] = NULL;
-  // Shrink the vector if convenient.
-  while (!families->empty() && families->back() == NULL) families->pop_back();
+  BenchmarkFamilies::GetInstance()->RemoveBenchmark(registration_index_);
 }
 
 Benchmark* Benchmark::Arg(int x) {
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   rangeX_.push_back(x);
   return this;
 }
@@ -622,7 +717,7 @@ Benchmark* Benchmark::Range(int start, int limit) {
   std::vector<int> arglist;
   AddRange(&arglist, start, limit, kRangeMultiplier);
 
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   for (size_t i = 0; i < arglist.size(); ++i) rangeX_.push_back(arglist[i]);
   return this;
 }
@@ -630,13 +725,13 @@ Benchmark* Benchmark::Range(int start, int limit) {
 Benchmark* Benchmark::DenseRange(int start, int limit) {
   CHECK_GE(start, 0);
   CHECK_LE(start, limit);
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   for (int arg = start; arg <= limit; ++arg) rangeX_.push_back(arg);
   return this;
 }
 
 Benchmark* Benchmark::ArgPair(int x, int y) {
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   rangeX_.push_back(x);
   rangeY_.push_back(y);
   return this;
@@ -647,7 +742,7 @@ Benchmark* Benchmark::RangePair(int lo1, int hi1, int lo2, int hi2) {
   AddRange(&arglist1, lo1, hi1, kRangeMultiplier);
   AddRange(&arglist2, lo2, hi2, kRangeMultiplier);
 
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   rangeX_.resize(arglist1.size());
   std::copy(arglist1.begin(), arglist1.end(), rangeX_.begin());
   rangeY_.resize(arglist2.size());
@@ -662,7 +757,7 @@ Benchmark* Benchmark::Apply(void (*custom_arguments)(Benchmark* benchmark)) {
 
 Benchmark* Benchmark::Threads(int t) {
   CHECK_GT(t, 0);
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   thread_counts_.push_back(t);
   return this;
 }
@@ -671,13 +766,13 @@ Benchmark* Benchmark::ThreadRange(int min_threads, int max_threads) {
   CHECK_GT(min_threads, 0);
   CHECK_GE(max_threads, min_threads);
 
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   AddRange(&thread_counts_, min_threads, max_threads, 2);
   return this;
 }
 
 Benchmark* Benchmark::ThreadPerCpu() {
-  mutex_lock l(&benchmark_mutex);
+  std::lock_guard<std::mutex> l(benchmark_mutex);
   thread_counts_.push_back(NumCPUs());
   return this;
 }
@@ -738,56 +833,6 @@ std::vector<Benchmark::Instance> Benchmark::CreateBenchmarkInstances(
   }
 
   return instances;
-}
-
-// Extract the list of benchmark instances that match the specified
-// regular expression.
-void Benchmark::FindBenchmarks(const std::string& spec,
-                               std::vector<Instance>* benchmarks) {
-  // Make regular expression out of command-line flag
-  regex_t re;
-  int ec = regcomp(&re, spec.c_str(), REG_EXTENDED | REG_NOSUB);
-  if (ec != 0) {
-    size_t needed = regerror(ec, &re, NULL, 0);
-    char* errbuf = new char[needed];
-    regerror(ec, &re, errbuf, needed);
-    std::cerr << "Could not compile benchmark re: " << errbuf << "\n";
-    delete[] errbuf;
-    return;
-  }
-
-  mutex_lock l(&benchmark_mutex);
-  for (Benchmark* family : *families) {
-    if (family == nullptr) continue;  // Family was deleted
-
-    // Match against filter.
-    if (regexec(&re, family->name_.c_str(), 0, NULL, 0) != 0) {
-#ifdef DEBUG
-      std::cout << "Skipping " << family->name_ << "\n";
-#endif
-      continue;
-    }
-
-    std::vector<Benchmark::Instance> instances;
-    if (family->rangeX_.empty() && family->rangeY_.empty()) {
-      instances = family->CreateBenchmarkInstances(kNoRange, kNoRange);
-      benchmarks->insert(benchmarks->end(), instances.begin(), instances.end());
-    } else if (family->rangeY_.empty()) {
-      for (size_t x = 0; x < family->rangeX_.size(); ++x) {
-        instances = family->CreateBenchmarkInstances(x, kNoRange);
-        benchmarks->insert(benchmarks->end(), instances.begin(),
-                           instances.end());
-      }
-    } else {
-      for (size_t x = 0; x < family->rangeX_.size(); ++x) {
-        for (size_t y = 0; y < family->rangeY_.size(); ++y) {
-          instances = family->CreateBenchmarkInstances(x, y);
-          benchmarks->insert(benchmarks->end(), instances.begin(),
-                             instances.end());
-        }
-      }
-    }
-  }
 }
 
 void Benchmark::MeasureOverhead() {
@@ -862,7 +907,7 @@ void Benchmark::RunInstance(const Instance& b, const BenchmarkReporter* br) {
 
 // Run the specified benchmark, measure its peak memory usage, and
 // return the peak memory usage.
-double Benchmark::MeasurePeakHeapMemory(const Instance& b) {
+double Benchmark::MeasurePeakHeapMemory(const Instance&) {
   if (!get_memory_usage) return 0.0;
   double bytes = 0.0;
   /*  TODO(dominich)
@@ -899,8 +944,10 @@ State::State(FastClock* clock, SharedState* s, int t)
       start_cpu_(0.0),
       start_time_(0.0),
       stop_time_micros_(0.0),
-      start_pause_(0.0),
-      pause_time_(0.0),
+      start_pause_cpu_(0.0),
+      pause_cpu_time_(0.0),
+      start_pause_real_(0.0),
+      pause_real_time_(0.0),
       total_iterations_(0),
       interval_micros_(static_cast<int64_t>(kNumMicrosPerSecond *
                                             FLAGS_benchmark_min_time /
@@ -914,49 +961,79 @@ State::State(FastClock* clock, SharedState* s, int t)
 bool State::KeepRunning() {
   // Fast path
   if ((FLAGS_benchmark_iterations == 0 &&
-       !clock_->HasReached(stop_time_micros_ + pause_time_)) ||
+       !clock_->HasReached(stop_time_micros_ +
+                           kNumMicrosPerSecond * pause_real_time_)) ||
       iterations_ < FLAGS_benchmark_iterations) {
     ++iterations_;
     return true;
   }
 
+  // To block thread 0 until all other threads exit, we have a signal exit
+  // point for KeepRunning() to return false.  The fast path above always
+  // returns true.
+  bool ret = false;
   switch (state_) {
     case STATE_INITIAL:
-      return StartRunning();
+      ret = StartRunning();
+      break;
     case STATE_STARTING:
       CHECK(false);
-      return true;
+      ret = true;
+      break;
     case STATE_RUNNING:
-      return FinishInterval();
+      ret = FinishInterval();
+      break;
     case STATE_STOPPING:
-      return MaybeStop();
+      ret = MaybeStop();
+      break;
     case STATE_STOPPED:
       CHECK(false);
-      return true;
+      ret = true;
+      break;
   }
-  CHECK(false);
-  return false;
+
+  if (!ret && shared_->threads > 1 && thread_index == 0){
+    std::unique_lock<std::mutex> l(shared_->mu);
+
+    // Block until all other threads have exited.  We can then safely cleanup
+    // without other threads continuing to access shared variables inside the
+    // user-provided run function.
+    while (shared_->exited < shared_->threads - 1) {
+      shared_->cond.wait(l);
+    }
+  }
+
+  if (ret) {
+    ++iterations_;
+  }
+  return ret;
 }
 
-void State::PauseTiming() { start_pause_ = walltime::Now(); }
+void State::PauseTiming() {
+  start_pause_cpu_ = MyCPUUsage() + ChildrenCPUUsage();
+  start_pause_real_ = walltime::Now();
+}
 
-void State::ResumeTiming() { pause_time_ += walltime::Now() - start_pause_; }
+void State::ResumeTiming() {
+  pause_cpu_time_ += MyCPUUsage() + ChildrenCPUUsage() - start_pause_cpu_;
+  pause_real_time_ += walltime::Now() - start_pause_real_;
+}
 
 void State::SetBytesProcessed(int64_t bytes) {
   CHECK_EQ(STATE_STOPPED, state_);
-  mutex_lock l(&shared_->mu);
+  std::lock_guard<std::mutex> l(shared_->mu);
   stats_->bytes_processed = bytes;
 }
 
 void State::SetItemsProcessed(int64_t items) {
   CHECK_EQ(STATE_STOPPED, state_);
-  mutex_lock l(&shared_->mu);
+  std::lock_guard<std::mutex> l(shared_->mu);
   stats_->items_processed = items;
 }
 
 void State::SetLabel(const std::string& label) {
   CHECK_EQ(STATE_STOPPED, state_);
-  mutex_lock l(&shared_->mu);
+  std::lock_guard<std::mutex> l(shared_->mu);
   shared_->label = label;
 }
 
@@ -982,7 +1059,7 @@ int State::range_y() const {
 bool State::StartRunning() {
   bool last_thread = false;
   {
-    mutex_lock l(&shared_->mu);
+    std::lock_guard<std::mutex> l(shared_->mu);
     CHECK_EQ(state_, STATE_INITIAL);
     state_ = STATE_STARTING;
     is_continuation_ = false;
@@ -995,12 +1072,12 @@ bool State::StartRunning() {
     clock_->InitType(use_real_time ? FastClock::REAL_TIME
                                    : FastClock::CPU_TIME);
     {
-      mutex_lock l(&starting_mutex);
-      pthread_cond_broadcast(&starting_cv);
+      std::lock_guard<std::mutex> l(starting_mutex);
+      starting_cv.notify_all();
     }
   } else {
-    mutex_lock l(&starting_mutex);
-    pthread_cond_wait(&starting_cv, &starting_mutex);
+    std::unique_lock<std::mutex> l(starting_mutex);
+    starting_cv.wait(l);
   }
   CHECK_EQ(state_, STATE_STARTING);
   state_ = STATE_RUNNING;
@@ -1017,7 +1094,8 @@ void State::NewInterval() {
               << "\n";
 #endif
     iterations_ = 0;
-    pause_time_ = 0;
+    pause_cpu_time_ = 0;
+    pause_real_time_ = 0;
     start_cpu_ = MyCPUUsage() + ChildrenCPUUsage();
     start_time_ = walltime::Now();
   } else {
@@ -1049,16 +1127,17 @@ bool State::FinishInterval() {
 
   const double accumulated_time = walltime::Now() - start_time_;
   const double total_overhead = overhead * iterations_;
-  CHECK_LT(pause_time_, accumulated_time);
-  CHECK_LT(pause_time_ + total_overhead, accumulated_time);
+  CHECK_LT(pause_real_time_, accumulated_time);
+  CHECK_LT(pause_real_time_ + total_overhead, accumulated_time);
   data.real_accumulated_time =
-      accumulated_time - (pause_time_ + total_overhead);
-  data.cpu_accumulated_time = (MyCPUUsage() + ChildrenCPUUsage()) - start_cpu_;
+      accumulated_time - (pause_real_time_ + total_overhead);
+  data.cpu_accumulated_time = (MyCPUUsage() + ChildrenCPUUsage()) -
+                              (pause_cpu_time_ + start_cpu_);
   total_iterations_ += iterations_;
 
   bool keep_going = false;
   {
-    mutex_lock l(&shared_->mu);
+    std::lock_guard<std::mutex> l(shared_->mu);
 
     // Either replace the last or add a new data point.
     if (is_continuation_)
@@ -1095,7 +1174,7 @@ bool State::FinishInterval() {
 }
 
 bool State::MaybeStop() {
-  mutex_lock l(&shared_->mu);
+  std::lock_guard<std::mutex> l(shared_->mu);
   if (shared_->stopping < shared_->threads) {
     CHECK_EQ(state_, STATE_STOPPING);
     return true;
@@ -1108,22 +1187,37 @@ void State::Run() {
   stats_->Reset();
   shared_->instance->bm->function_(*this);
   {
-    mutex_lock l(&shared_->mu);
+    std::lock_guard<std::mutex> l(shared_->mu);
     shared_->stats.Add(*stats_);
   }
 }
 
 void State::RunAsThread() {
-  CHECK_EQ(0, pthread_create(&thread_, nullptr, &State::RunWrapper, this));
+  thread_ = std::thread(State::RunWrapper, this);
 }
 
-void State::Wait() { CHECK_EQ(0, pthread_join(thread_, nullptr)); }
+void State::Wait() {
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+}
 
 // static
 void* State::RunWrapper(void* arg) {
   State* that = (State*)arg;
   CHECK(that != nullptr);
   that->Run();
+
+  std::lock_guard<std::mutex> l(that->shared_->mu);
+
+  that->shared_->exited++;
+  if (that->thread_index > 0 &&
+      that->shared_->exited == that->shared_->threads - 1) {
+    // All threads but thread 0 have exited the user-provided run function.
+    // Thread 0 can now wake up and exit.
+    that->shared_->cond.notify_one();
+  }
+
   return nullptr;
 }
 
@@ -1134,7 +1228,7 @@ void RunMatchingBenchmarks(const std::string& spec,
   if (spec.empty()) return;
 
   std::vector<internal::Benchmark::Instance> benchmarks;
-  internal::Benchmark::FindBenchmarks(spec, &benchmarks);
+  BenchmarkFamilies::GetInstance()->FindBenchmarks(spec, &benchmarks);
 
   // Determine the width of the name field using a minimum width of 10.
   // Also determine max number of threads needed.
@@ -1173,7 +1267,7 @@ void FindMatchingBenchmarkNames(const std::string& spec,
   if (spec.empty()) return;
 
   std::vector<internal::Benchmark::Instance> benchmarks;
-  internal::Benchmark::FindBenchmarks(spec, &benchmarks);
+  BenchmarkFamilies::GetInstance()->FindBenchmarks(spec, &benchmarks);
   std::transform(benchmarks.begin(), benchmarks.end(), benchmark_names->begin(),
                  [](const internal::Benchmark::Instance& b) { return b.name; });
 }
@@ -1187,15 +1281,9 @@ void RunSpecifiedBenchmarks(const BenchmarkReporter* reporter /*= nullptr*/) {
   internal::ConsoleReporter default_reporter;
   internal::RunMatchingBenchmarks(
       spec, reporter == nullptr ? &default_reporter : reporter);
-  pthread_cond_destroy(&starting_cv);
-  pthread_mutex_destroy(&starting_mutex);
-  pthread_mutex_destroy(&benchmark_mutex);
 }
 
 void Initialize(int* argc, const char** argv) {
-  pthread_mutex_init(&benchmark_mutex, nullptr);
-  pthread_mutex_init(&starting_mutex, nullptr);
-  pthread_cond_init(&starting_cv, nullptr);
   walltime::Initialize();
   internal::ParseCommandLineFlags(argc, argv);
   internal::Benchmark::MeasureOverhead();

@@ -7,8 +7,10 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -34,7 +36,7 @@ std::set<int> ConstructRandomSet(int size) {
   return s;
 }
 
-pthread_mutex_t test_vector_mu;
+std::mutex test_vector_mu;
 std::vector<int>* test_vector = nullptr;
 
 }  // end namespace
@@ -86,12 +88,13 @@ BENCHMARK(BM_SetInsert)->RangePair(1<<10,8<<10, 1,10);
 
 template<typename Q>
 static void BM_Sequential(benchmark::State& state) {
-  Q q;
-  typename Q::value_type v;
-  while (state.KeepRunning())
+  typename Q::value_type v = 42;
+  while (state.KeepRunning()) {
+    Q q;
     for (int i = state.range_x(); --i; )
       q.push_back(v);
-  const int64_t items_processed = 
+  }
+  const int64_t items_processed =
       static_cast<int64_t>(state.iterations()) * state.range_x();
   state.SetItemsProcessed(items_processed);
   state.SetBytesProcessed(items_processed * sizeof(v));
@@ -112,23 +115,20 @@ BENCHMARK(BM_StringCompare)->Range(1, 1<<20);
 
 static void BM_SetupTeardown(benchmark::State& state) {
   if (state.thread_index == 0) {
-    pthread_mutex_init(&test_vector_mu, nullptr);
     // No need to lock test_vector_mu here as this is running single-threaded.
     test_vector = new std::vector<int>();
   }
   int i = 0;
   while (state.KeepRunning()) {
-    pthread_mutex_lock(&test_vector_mu);
+    std::lock_guard<std::mutex> l(test_vector_mu);
     if (i%2 == 0)
       test_vector->push_back(i);
     else
       test_vector->pop_back();
-    pthread_mutex_unlock(&test_vector_mu);
     ++i;
   }
   if (state.thread_index == 0) {
     delete test_vector;
-    pthread_mutex_destroy(&test_vector_mu);
   }
 }
 BENCHMARK(BM_SetupTeardown)->ThreadPerCpu();
@@ -142,12 +142,45 @@ static void BM_LongTest(benchmark::State& state) {
 }
 BENCHMARK(BM_LongTest)->Range(1<<16,1<<28);
 
+class TestReporter : public benchmark::internal::ConsoleReporter {
+ public:
+  virtual bool ReportContext(const Context& context) const {
+    return ConsoleReporter::ReportContext(context);
+  };
+
+  virtual void ReportRuns(const std::vector<Run>& report) const {
+    ++count_;
+    ConsoleReporter::ReportRuns(report);
+  };
+
+  TestReporter() : count_(0) {}
+
+  virtual ~TestReporter() {}
+
+  int GetCount() const {
+    return count_;
+  }
+
+ private:
+  mutable size_t count_;
+};
+
 int main(int argc, const char* argv[]) {
   benchmark::Initialize(&argc, argv);
 
   CHECK(Factorial(8) == 40320);
   CHECK(CalculatePi(1) == 0.0);
 
-  benchmark::RunSpecifiedBenchmarks();
+  TestReporter test_reporter;
+  benchmark::RunSpecifiedBenchmarks(&test_reporter);
+
+  // Make sure we ran all of the tests
+  const size_t count = test_reporter.GetCount();
+  const size_t expected = (argc == 2) ? std::stoul(argv[1]) : count;
+  if (count != expected) {
+    std::cerr << "ERROR: Expected " << expected << " tests to be ran but only "
+              << count << " completed" << std::endl;
+    return -1;
+  }
 }
 
