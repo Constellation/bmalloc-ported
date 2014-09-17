@@ -29,6 +29,7 @@
 #include "Inline.h"
 #include "VMAllocate.h"
 #include <cstddef>
+#include <cstring>
 #include <string>
 
 namespace bmalloc {
@@ -112,7 +113,7 @@ void Vector<T>::push(const T* begin, const T* end)
     size_t newSize = m_size + (end - begin);
     if (newSize > m_capacity)
         growCapacity(newSize);
-    memcpy(this->end(), begin, (end - begin) * sizeof(T));
+    std::memcpy(this->end(), begin, (end - begin) * sizeof(T));
     m_size = newSize;
 }
 

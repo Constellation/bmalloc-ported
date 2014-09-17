@@ -27,6 +27,7 @@
 #define EndTag_h
 
 #include "BoundaryTag.h"
+#include <cstring>
 
 namespace bmalloc {
 
@@ -37,7 +38,7 @@ public:
 
 inline EndTag& EndTag::operator=(const BeginTag& other)
 {
-    memcpy(this, &other, sizeof(BoundaryTag));
+    std::memcpy(this, &other, sizeof(BoundaryTag));
     setEnd(true);
     return *this;
 }
