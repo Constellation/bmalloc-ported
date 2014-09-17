@@ -28,7 +28,7 @@
 #include <helper/API.h>
 #include <helper/BAllocator.h>
 
-void BenchVector(benchmark::State& state) {
+void VectorPushBackBMalloc(benchmark::State& state) {
     while (state.KeepRunning()) {
         std::vector<int, BAllocator<int>> vector;
         for (int i = 0; i < 1000000; ++i) {
@@ -36,4 +36,14 @@ void BenchVector(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(BenchVector);
+BENCHMARK(VectorPushBackBMalloc);
+
+void VectorPushBackSystem(benchmark::State& state) {
+    while (state.KeepRunning()) {
+        std::vector<int, std::allocator<int>> vector;
+        for (int i = 0; i < 1000000; ++i) {
+            vector.push_back(i);
+        }
+    }
+}
+BENCHMARK(VectorPushBackSystem);
