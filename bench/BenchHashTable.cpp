@@ -41,7 +41,7 @@ void HashTable_Insert_BMalloc(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(HashTable_Insert_BMalloc)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
+BENCHMARK(HashTable_Insert_BMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
 
 void HashTable_Insert_System(benchmark::State& state) {
     typedef int Key;
@@ -54,4 +54,4 @@ void HashTable_Insert_System(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(HashTable_Insert_System)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
+BENCHMARK(HashTable_Insert_System)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
