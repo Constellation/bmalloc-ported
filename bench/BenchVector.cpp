@@ -22,21 +22,18 @@
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <gtest/gtest.h>
+#include <benchmark/benchmark.h>
 
 #include <vector>
 #include <API.h>
 #include <BAllocator.h>
 
-TEST(TestVector, PushBack) {
-    std::vector<int, BAllocator<int>> vec;
-
-    for (int i = 0; i < 100000; ++i) {
-        vec.push_back(i);
-    }
-    EXPECT_EQ(100000u, vec.size());
-
-    for (int i = 0; i < 100000; ++i) {
-        EXPECT_EQ(i, vec[i]) << i;
+void BenchVector(benchmark::State& state) {
+    while (state.KeepRunning()) {
+        std::vector<int, BAllocator<int>> vector;
+        for (int i = 0; i < 1000000; ++i) {
+            vector.push_back(i);
+        }
     }
 }
+BENCHMARK(BenchVector);

@@ -21,39 +21,7 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-#ifndef BALLOCATOR_H_
-#define BALLOCATOR_H_
-
-template<class T>
-class BAllocator {
-public:
-    typedef T value_type;
-
-    value_type* allocate(std::size_t n)
-    {
-        return static_cast<value_type*>(bmalloc::api::malloc(sizeof(T) * n));
-    }
-
-    void deallocate(value_type* ptr, std::size_t)
-    {
-        bmalloc::api::free(static_cast<void*>(ptr));
-    }
-
-    BAllocator() noexcept { }
-    BAllocator(const BAllocator&) noexcept { }
-    template<class U> BAllocator(const BAllocator<U>& ) noexcept { }
-
-    ~BAllocator() noexcept { }
-
-    template<class U> bool operator==(const BAllocator<U>&)
-    {
-        return true;
-    }
-
-    template<class U> bool operator!=(const BAllocator<U>&)
-    {
-        return false;
-    }
-};
-
-#endif  /* BALLOCATOR_H_ */
+#ifndef UTILITY_API_H_
+#define UTILITY_API_H_
+#include <bmalloc.h>
+#endif  /* UTILITY_API_H_ */

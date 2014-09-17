@@ -44,5 +44,7 @@ file(GLOB src "bmalloc/*.cpp")
 add_library(bmalloc STATIC ${src})
 
 set(BMALLOC_LIBS ${CMAKE_THREAD_LIBS_INIT} bmalloc)
+include_directories("utility")
 
 add_subdirectory(test)
+add_subdirectory(bench)

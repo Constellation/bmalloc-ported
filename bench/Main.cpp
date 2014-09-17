@@ -1,3 +1,4 @@
+
 /*
   Copyright (C) 2014 Yusuke Suzuki <utatane.tea@gmail.com>
 
@@ -22,21 +23,10 @@
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <gtest/gtest.h>
+#include <benchmark/benchmark.h>
 
-#include <vector>
-#include <API.h>
-#include <BAllocator.h>
-
-TEST(TestVector, PushBack) {
-    std::vector<int, BAllocator<int>> vec;
-
-    for (int i = 0; i < 100000; ++i) {
-        vec.push_back(i);
-    }
-    EXPECT_EQ(100000u, vec.size());
-
-    for (int i = 0; i < 100000; ++i) {
-        EXPECT_EQ(i, vec[i]) << i;
-    }
+int main(int argc, const char** argv) {
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
 }
