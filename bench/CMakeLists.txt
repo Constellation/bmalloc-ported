@@ -2,7 +2,6 @@
 
 add_subdirectory("google-benchmark")
 
-include_directories("${PROJECT_SOURCE_DIR}/bmalloc")
 link_directories("google-benchmark")
 include_directories("google-benchmark/include")
 

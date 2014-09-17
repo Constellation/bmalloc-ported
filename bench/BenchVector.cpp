@@ -25,8 +25,8 @@
 #include <benchmark/benchmark.h>
 
 #include <vector>
-#include <API.h>
-#include <BAllocator.h>
+#include <helper/API.h>
+#include <helper/BAllocator.h>
 
 void BenchVector(benchmark::State& state) {
     while (state.KeepRunning()) {

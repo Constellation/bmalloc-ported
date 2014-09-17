@@ -25,8 +25,8 @@
 #include <gtest/gtest.h>
 
 #include <vector>
-#include <API.h>
-#include <BAllocator.h>
+#include <helper/API.h>
+#include <helper/BAllocator.h>
 
 TEST(TestVector, PushBack) {
     std::vector<int, BAllocator<int>> vec;

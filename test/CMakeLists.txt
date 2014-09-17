@@ -2,7 +2,6 @@
 
 add_subdirectory("google-test")
 
-include_directories("${PROJECT_SOURCE_DIR}/bmalloc")
 link_directories("google-test")
 include_directories("google-test")
 
