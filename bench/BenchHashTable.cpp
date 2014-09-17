@@ -24,26 +24,34 @@
 
 #include <benchmark/benchmark.h>
 
-#include <vector>
+#include <unordered_map>
+#include <utility>
 #include <helper/API.h>
 #include <helper/BAllocator.h>
 
-void Vector_PushBack_BMalloc(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, BAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
-    }
-}
-BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
 
-void Vector_PushBack_System(benchmark::State& state) {
+void HashTable_Insert_BMalloc(benchmark::State& state) {
+    typedef int Key;
+    typedef int Value;
+    typedef std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>, BAllocator<std::pair<const Key, Value>>> HashTable;
     while (state.KeepRunning()) {
-        std::vector<int, std::allocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
+        HashTable table;
+        for (int i = 0; i < state.range_x(); ++i) {
+            table.insert(std::make_pair(i, 20));
         }
     }
 }
-BENCHMARK(Vector_PushBack_System)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
+BENCHMARK(HashTable_Insert_BMalloc)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
+
+void HashTable_Insert_System(benchmark::State& state) {
+    typedef int Key;
+    typedef int Value;
+    typedef std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>, std::allocator<std::pair<const Key, Value>>> HashTable;
+    while (state.KeepRunning()) {
+        HashTable table;
+        for (int i = 0; i < state.range_x(); ++i) {
+            table.insert(std::make_pair(i, 20));
+        }
+    }
+}
+BENCHMARK(HashTable_Insert_System)->Arg(1 << 14)->Arg(1 << 15)->Arg(1 << 16)->Arg(1 << 17);
