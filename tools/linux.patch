@@ -1,0 +1,115 @@
+commit 807da03b7cb19ffdf9a726773732122459f97c3c
+Author: Yusuke Suzuki <utatane.tea@gmail.com>
+Date:   Wed Sep 17 19:09:03 2014 +0900
+
+    Fix bmalloc headers to support linux
+
+diff --git a/bmalloc/BoundaryTag.h b/bmalloc/BoundaryTag.h
+index f4a5054..9f9a1e7 100644
+--- a/bmalloc/BoundaryTag.h
++++ b/bmalloc/BoundaryTag.h
+@@ -29,6 +29,7 @@
+ #include "BAssert.h"
+ #include "Range.h"
+ #include "Sizes.h"
++#include <cstring>
+ 
+ namespace bmalloc {
+ 
+@@ -57,7 +58,7 @@ class BoundaryTag {
+     void setHasPhysicalPages(bool hasPhysicalPages) { m_hasPhysicalPages = hasPhysicalPages; }
+ 
+     bool isNull() { return !m_size; }
+-    void clear() { memset(this, 0, sizeof(*this)); }
++    void clear() { std::memset(this, 0, sizeof(*this)); }
+     
+     size_t size() { return m_size; }
+     unsigned compactBegin() { return m_compactBegin; }
+diff --git a/bmalloc/EndTag.h b/bmalloc/EndTag.h
+index 9eae997..becae5b 100644
+--- a/bmalloc/EndTag.h
++++ b/bmalloc/EndTag.h
+@@ -27,6 +27,7 @@
+ #define EndTag_h
+ 
+ #include "BoundaryTag.h"
++#include <cstring>
+ 
+ namespace bmalloc {
+ 
+@@ -37,7 +38,7 @@ class EndTag : public BoundaryTag {
+ 
+ inline EndTag& EndTag::operator=(const BeginTag& other)
+ {
+-    memcpy(this, &other, sizeof(BoundaryTag));
++    std::memcpy(this, &other, sizeof(BoundaryTag));
+     setEnd(true);
+     return *this;
+ }
+diff --git a/bmalloc/VMAllocate.h b/bmalloc/VMAllocate.h
+index 7f41dd4..ec1a8bd 100644
+--- a/bmalloc/VMAllocate.h
++++ b/bmalloc/VMAllocate.h
+@@ -31,13 +31,19 @@
+ #include "Sizes.h"
+ #include "Syscall.h"
+ #include <algorithm>
++#if defined(__has_include) && __has_include(<mach/vm_statistics.h>)
+ #include <mach/vm_statistics.h>
++#endif
+ #include <sys/mman.h>
+ #include <unistd.h>
+ 
+ namespace bmalloc {
+ 
++#ifdef VM_MEMORY_TCMALLOC
+ #define BMALLOC_VM_TAG VM_MAKE_TAG(VM_MEMORY_TCMALLOC)
++#else
++#define BMALLOC_VM_TAG (MAP_PRIVATE | MAP_ANON)
++#endif
+ 
+ inline size_t vmSize(size_t size)
+ {
+@@ -103,13 +109,21 @@ inline void vmDeallocate(void* p, size_t vmSize)
+ inline void vmDeallocatePhysicalPages(void* p, size_t vmSize)
+ {
+     vmValidate(p, vmSize);
++#if defined(MADV_FREE_REUSABLE)
+     SYSCALL(madvise(p, vmSize, MADV_FREE_REUSABLE));
++#else
++    SYSCALL(madvise(p, vmSize, MADV_DONTNEED));
++#endif
+ }
+ 
+ inline void vmAllocatePhysicalPages(void* p, size_t vmSize)
+ {
+     vmValidate(p, vmSize);
++#if defined(MADV_FREE_REUSE)
+     SYSCALL(madvise(p, vmSize, MADV_FREE_REUSE));
++#else
++    SYSCALL(madvise(p, vmSize, MADV_WILLNEED));
++#endif
+ }
+ 
+ // Trims requests that are un-page-aligned. NOTE: size must be at least a page.
+diff --git a/bmalloc/Vector.h b/bmalloc/Vector.h
+index 5a0688e..08d8fef 100644
+--- a/bmalloc/Vector.h
++++ b/bmalloc/Vector.h
+@@ -29,6 +29,7 @@
+ #include "Inline.h"
+ #include "VMAllocate.h"
+ #include <cstddef>
++#include <cstring>
+ #include <string>
+ 
+ namespace bmalloc {
+@@ -112,7 +113,7 @@ class Vector {
+     size_t newSize = m_size + (end - begin);
+     if (newSize > m_capacity)
+         growCapacity(newSize);
+-    memcpy(this->end(), begin, (end - begin) * sizeof(T));
++    std::memcpy(this->end(), begin, (end - begin) * sizeof(T));
+     m_size = newSize;
+ }
+ 
