@@ -23,37 +23,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "BoundaryTagInlines.h"
-#include "Heap.h"
-#include "LargeChunk.h"
-#include "Line.h"
-#include "PerProcess.h"
-#include <thread>
+#ifndef LineMetadata_h
+#define LineMetadata_h
 
 namespace bmalloc {
 
-VMHeap::VMHeap()
-{
-}
-
-void VMHeap::allocateSmallChunk()
-{
-    SmallChunk* chunk = SmallChunk::create();
-    for (auto* it = chunk->begin(); it != chunk->end(); ++it)
-        m_smallPages.push(it);
-}
-
-void VMHeap::allocateMediumChunk()
-{
-    MediumChunk* chunk = MediumChunk::create();
-    for (auto* it = chunk->begin(); it != chunk->end(); ++it)
-        m_mediumPages.push(it);
-}
-
-Range VMHeap::allocateLargeChunk()
-{
-    LargeChunk* chunk = LargeChunk::create();
-    return BoundaryTag::init(chunk);
-}
+struct LineMetadata {
+    unsigned short startOffset;
+    unsigned short objectCount;
+};
 
 } // namespace bmalloc
+
+#endif // LineMetadata_h
