@@ -11,6 +11,9 @@ env:
     - BUILD_TYPE=Debug
     - BUILD_TYPE=Release
 
+install:
+    - apt-get install -yqq libc6-dev
+
 before_script:
     - "cmake -H. -Bout -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX"
 
