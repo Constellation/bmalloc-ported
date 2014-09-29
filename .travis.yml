@@ -20,8 +20,8 @@ script:
     - if [ "$BUILD_TYPE" == "Release" ]; then out/bench/benchmarks; fi
 
 notifications:
-    recipients:
-        - utatane.tea@gmail.com
     email:
+        recipients:
+            - utatane.tea@gmail.com
         on_success: change
         on_failure: always
