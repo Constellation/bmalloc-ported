@@ -7,4 +7,4 @@ include_directories("google-benchmark/include")
 
 file(GLOB src "*.cpp")
 add_executable(benchmarks ${src})
-target_link_libraries(benchmarks google-benchmark ${BMALLOC_LIBS})
+target_link_libraries(benchmarks google-benchmark libjemalloc ${BMALLOC_LIBS})

@@ -23,38 +23,22 @@
 */
 #ifndef HELPER_BALLOCATOR_H_
 #define HELPER_BALLOCATOR_H_
+#include "Allocator.h"
 #include "API.h"
 
-template<class T>
-class BAllocator {
-public:
-    typedef T value_type;
-
-    value_type* allocate(std::size_t n)
+struct BMallocTraits {
+    static void* malloc(size_t size)
     {
-        return static_cast<value_type*>(bmalloc::api::malloc(sizeof(T) * n));
+        return bmalloc::api::malloc(size);
     }
 
-    void deallocate(value_type* ptr, std::size_t)
+    static void free(void* ptr)
     {
-        bmalloc::api::free(static_cast<void*>(ptr));
-    }
-
-    BAllocator() noexcept { }
-    BAllocator(const BAllocator&) noexcept { }
-    template<class U> BAllocator(const BAllocator<U>& ) noexcept { }
-
-    ~BAllocator() noexcept { }
-
-    template<class U> bool operator==(const BAllocator<U>&)
-    {
-        return true;
-    }
-
-    template<class U> bool operator!=(const BAllocator<U>&)
-    {
-        return false;
+        bmalloc::api::free(ptr);
     }
 };
+
+template<class T>
+using BAllocator = Allocator<T, BMallocTraits>;
 
 #endif  /* HELPER_BALLOCATOR_H_ */

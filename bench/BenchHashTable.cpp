@@ -28,7 +28,7 @@
 #include <utility>
 #include <helper/API.h>
 #include <helper/BAllocator.h>
-
+#include <helper/JEAllocator.h>
 
 void HashTable_Insert_BMalloc(benchmark::State& state) {
     typedef int Key;
@@ -55,3 +55,16 @@ void HashTable_Insert_System(benchmark::State& state) {
     }
 }
 BENCHMARK(HashTable_Insert_System)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
+
+void HashTable_Insert_JEMalloc(benchmark::State& state) {
+    typedef int Key;
+    typedef int Value;
+    typedef std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>, JEAllocator<std::pair<const Key, Value>>> HashTable;
+    while (state.KeepRunning()) {
+        HashTable table;
+        for (int i = 0; i < state.range_x(); ++i) {
+            table.insert(std::make_pair(i, 20));
+        }
+    }
+}
+BENCHMARK(HashTable_Insert_JEMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);

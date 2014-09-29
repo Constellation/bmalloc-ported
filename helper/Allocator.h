@@ -21,40 +21,39 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#ifndef HELPER_ALLOCATOR_H_
+#define HELPER_ALLOCATOR_H_
 
-#include <benchmark/benchmark.h>
+template<class T, class AllocatorTraits>
+class Allocator {
+public:
+    typedef T value_type;
 
-#include <vector>
-#include <helper/API.h>
-#include <helper/BAllocator.h>
-#include <helper/JEAllocator.h>
-
-void Vector_PushBack_BMalloc(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, BAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
+    value_type* allocate(std::size_t n)
+    {
+        return static_cast<value_type*>(AllocatorTraits::malloc(sizeof(T) * n));
     }
-}
-BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
 
-void Vector_PushBack_System(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, std::allocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
+    void deallocate(value_type* ptr, std::size_t)
+    {
+        AllocatorTraits::free(static_cast<void*>(ptr));
     }
-}
-BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
 
-void Vector_PushBack_JEMalloc(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, JEAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
+    Allocator() noexcept { }
+    Allocator(const Allocator&) noexcept { }
+    template<class U> Allocator(const Allocator<U, AllocatorTraits>& ) noexcept { }
+
+    ~Allocator() noexcept { }
+
+    template<class U> bool operator==(const Allocator<U, AllocatorTraits>&)
+    {
+        return true;
     }
-}
-BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+
+    template<class U> bool operator!=(const Allocator<U, AllocatorTraits>&)
+    {
+        return false;
+    }
+};
+
+#endif  /* HELPER_ALLOCATOR_H_ */

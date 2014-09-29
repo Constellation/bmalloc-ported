@@ -21,40 +21,24 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#ifndef HELPER_JEALLOCATOR_H_
+#define HELPER_JEALLOCATOR_H_
+#include <jemalloc/jemalloc.h>
+#include "Allocator.h"
 
-#include <benchmark/benchmark.h>
-
-#include <vector>
-#include <helper/API.h>
-#include <helper/BAllocator.h>
-#include <helper/JEAllocator.h>
-
-void Vector_PushBack_BMalloc(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, BAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
+struct JEMallocTraits {
+    static void* malloc(size_t size)
+    {
+        return je_internal_malloc(size);
     }
-}
-BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
 
-void Vector_PushBack_System(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, std::allocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
+    static void free(void* ptr)
+    {
+        je_internal_free(ptr);
     }
-}
-BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+};
 
-void Vector_PushBack_JEMalloc(benchmark::State& state) {
-    while (state.KeepRunning()) {
-        std::vector<int, JEAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
-            vector.push_back(i);
-        }
-    }
-}
-BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+template<class T>
+using JEAllocator = Allocator<T, JEMallocTraits>;
+
+#endif  /* HELPER_JEALLOCATOR_H_ */
