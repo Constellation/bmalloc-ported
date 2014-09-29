@@ -1,0 +1,27 @@
+language: cpp
+
+compiler:
+    - clang
+    - gcc
+
+os:
+    - linux
+
+env:
+    - BUILD_TYPE=Debug
+    - BUILD_TYPE=Release
+
+before_script:
+    - "cmake -H. -Bout -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX"
+
+script:
+    - make -C out
+    - out/test/unit_tests
+    - if [ "$BUILD_TYPE" == "Release" ]; then out/bench/benchmarks; fi
+
+notifications:
+    recipients:
+        - utatane.tea@gmail.com
+    email:
+        on_success: change
+        on_failure: always
