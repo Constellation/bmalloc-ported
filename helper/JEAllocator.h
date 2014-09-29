@@ -29,12 +29,12 @@
 struct JEMallocTraits {
     static void* malloc(size_t size)
     {
-        return je_internal_malloc(size);
+        return je_malloc(size);
     }
 
     static void free(void* ptr)
     {
-        je_internal_free(ptr);
+        je_free(ptr);
     }
 };
 
