@@ -38,7 +38,7 @@ void Vector_PushBack_BMalloc(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
 
 void Vector_PushBack_System(benchmark::State& state) {
     while (state.KeepRunning()) {
@@ -48,7 +48,7 @@ void Vector_PushBack_System(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
 
 void Vector_PushBack_JEMalloc(benchmark::State& state) {
     while (state.KeepRunning()) {
@@ -58,4 +58,4 @@ void Vector_PushBack_JEMalloc(benchmark::State& state) {
         }
     }
 }
-BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
