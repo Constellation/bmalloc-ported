@@ -33,29 +33,29 @@
 void Vector_PushBack_BMalloc(benchmark::State& state) {
     while (state.KeepRunning()) {
         std::vector<int, BAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
+        for (int i = 0; i < state.range_x(); ++i) {
             vector.push_back(i);
         }
     }
 }
-BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_BMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
 
 void Vector_PushBack_System(benchmark::State& state) {
     while (state.KeepRunning()) {
         std::vector<int, std::allocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
+        for (int i = 0; i < state.range_x(); ++i) {
             vector.push_back(i);
         }
     }
 }
-BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_System)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);
 
 void Vector_PushBack_JEMalloc(benchmark::State& state) {
     while (state.KeepRunning()) {
         std::vector<int, JEAllocator<int>> vector;
-        for (int i = 0; i < 1000000; ++i) {
+        for (int i = 0; i < state.range_x(); ++i) {
             vector.push_back(i);
         }
     }
 }
-BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 20)->Arg(1 << 30);
+BENCHMARK(Vector_PushBack_JEMalloc)->Arg(1 << 10)->Arg(1 << 14)->Arg(1 << 16)->Arg(1 << 20);

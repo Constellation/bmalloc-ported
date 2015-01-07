@@ -30,7 +30,7 @@
 #include "Inline.h"
 #include <mutex>
 #include <pthread.h>
-#if defined(__has_include) && __has_include(<System/pthread_machdep.h>)
+#ifdef __APPLE__
 #include <System/pthread_machdep.h>
 #endif
 
@@ -54,7 +54,7 @@ class Cache;
 
 template<typename T> struct PerThreadStorage;
 
-#if defined(__has_include) && __has_include(<System/pthread_machdep.h>)
+#ifdef __APPLE__
 // For now, we only support PerThread<Cache>. We can expand to other types by
 // using more keys.
 
@@ -114,7 +114,7 @@ template<typename T> std::once_flag PerThreadStorage<T>::onceFlag;
 template<typename T>
 INLINE T* PerThread<T>::getFastCase()
 {
-#if (!defined(__has_include) || !__has_include(<System/pthread_machdep.h>)) && !BCOMPILER_SUPPORTS(CXX_THREAD_LOCAL)
+#if !defined(__APPLE__) && !BCOMPILER_SUPPORTS(CXX_THREAD_LOCAL)
     PerThreadStorage<T>::initSharedKeyIfNeeded(destructor);
 #endif
     return static_cast<T*>(PerThreadStorage<T>::get());

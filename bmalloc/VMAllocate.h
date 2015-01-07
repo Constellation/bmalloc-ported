@@ -31,7 +31,7 @@
 #include "Sizes.h"
 #include "Syscall.h"
 #include <algorithm>
-#if defined(__has_include) && __has_include(<mach/vm_statistics.h>)
+#ifdef __APPLE__
 #include <mach/vm_statistics.h>
 #endif
 #include <sys/mman.h>
