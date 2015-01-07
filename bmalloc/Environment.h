@@ -23,55 +23,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "Cache.h"
-#include "Heap.h"
-#include "Inline.h"
-#include "PerProcess.h"
+#ifndef Environment_h
+#define Environment_h
 
 namespace bmalloc {
 
-void* Cache::operator new(size_t size)
-{
-    return vmAllocate(vmSize(size));
-}
+class Environment {
+public:
+    Environment();
+    
+    bool isBmallocEnabled() { return m_isBmallocEnabled; }
 
-void Cache::operator delete(void* p, size_t size)
-{
-    vmDeallocate(p, vmSize(size));
-}
+private:
+    bool computeIsBmallocEnabled();
 
-void Cache::scavenge()
-{
-    Cache* cache = PerThread<Cache>::getFastCase();
-    if (!cache)
-        return;
-
-    cache->allocator().scavenge();
-    cache->deallocator().scavenge();
-
-    std::unique_lock<StaticMutex> lock(PerProcess<Heap>::mutex());
-    PerProcess<Heap>::get()->scavenge(lock, std::chrono::milliseconds(0));
-}
-
-Cache::Cache()
-    : m_deallocator(PerProcess<Heap>::get())
-    , m_allocator(PerProcess<Heap>::get(), m_deallocator)
-{
-}
-
-NO_INLINE void* Cache::allocateSlowCaseNullCache(size_t size)
-{
-    return PerThread<Cache>::getSlowCase()->allocator().allocate(size);
-}
-
-NO_INLINE void Cache::deallocateSlowCaseNullCache(void* object)
-{
-    PerThread<Cache>::getSlowCase()->deallocator().deallocate(object);
-}
-
-NO_INLINE void* Cache::reallocateSlowCaseNullCache(void* object, size_t newSize)
-{
-    return PerThread<Cache>::getSlowCase()->allocator().reallocate(object, newSize);
-}
+    bool m_isBmallocEnabled;
+};
 
 } // namespace bmalloc
+
+#endif // Environment_h

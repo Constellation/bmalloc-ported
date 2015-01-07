@@ -27,8 +27,6 @@
 #define BPlatform_h
 
 #ifdef __APPLE__
-#include <Availability.h>
-#include <AvailabilityMacros.h>
 #include <TargetConditionals.h>
 #endif
 
@@ -38,20 +36,9 @@
     || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) \
     || (defined(TARGET_IPHONE_SIMULATOR) && TARGET_IPHONE_SIMULATOR))
 #define BPLATFORM_IOS 1
-#elif defined(__APPLE__)
-#define BPLATFORM_OS_X 1
 #endif
 
-#define BCOMPILER(COMPILER) (defined BCOMPILER_##PLATFORM && BCOMPILER_##PLATFORM)
 #define BCOMPILER_SUPPORTS(COMPILER_FEATURE) (defined BCOMPILER_SUPPORTS_##COMPILER_FEATURE && BCOMPILER_SUPPORTS_##COMPILER_FEATURE)
-
-#if defined(__clang__)
-#define BCOMPILER_CLANG 1
 #define BCOMPILER_SUPPORTS_CXX_THREAD_LOCAL (defined(__has_feature) && __has_feature(cxx_thread_local))
-#elif defined(__GNUC__)
-#define BCOMPILER_GCC 1
-#define BCOMPILER_SUPPORTS_CXX_THREAD_LOCAL 1
-#endif
-
 
 #endif // BPlatform_h

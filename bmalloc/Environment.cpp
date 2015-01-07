@@ -23,55 +23,64 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "Cache.h"
-#include "Heap.h"
-#include "Inline.h"
-#include "PerProcess.h"
+#include "Environment.h"
+#include <cstdlib>
+#include <cstring>
 
 namespace bmalloc {
 
-void* Cache::operator new(size_t size)
+static bool isMallocEnvironmentVariableSet()
 {
-    return vmAllocate(vmSize(size));
+    const char* list[] = {
+        "Malloc",
+        "MallocLogFile",
+        "MallocGuardEdges",
+        "MallocDoNotProtectPrelude",
+        "MallocDoNotProtectPostlude",
+        "MallocStackLogging",
+        "MallocStackLoggingNoCompact",
+        "MallocStackLoggingDirectory",
+        "MallocScribble",
+        "MallocCheckHeapStart",
+        "MallocCheckHeapEach",
+        "MallocCheckHeapSleep",
+        "MallocCheckHeapAbort",
+        "MallocErrorAbort",
+        "MallocCorruptionAbort",
+        "MallocHelp"
+    };
+    size_t size = sizeof(list) / sizeof(const char*);
+    
+    for (size_t i = 0; i < size; ++i) {
+        if (getenv(list[i]))
+            return true;
+    }
+
+    return false;
 }
 
-void Cache::operator delete(void* p, size_t size)
+static bool isLibgmallocEnabled()
 {
-    vmDeallocate(p, vmSize(size));
+    char* variable = getenv("DYLD_INSERT_LIBRARIES");
+    if (!variable)
+        return false;
+    if (!strstr(variable, "libgmalloc"))
+        return false;
+    return true;
 }
 
-void Cache::scavenge()
-{
-    Cache* cache = PerThread<Cache>::getFastCase();
-    if (!cache)
-        return;
-
-    cache->allocator().scavenge();
-    cache->deallocator().scavenge();
-
-    std::unique_lock<StaticMutex> lock(PerProcess<Heap>::mutex());
-    PerProcess<Heap>::get()->scavenge(lock, std::chrono::milliseconds(0));
-}
-
-Cache::Cache()
-    : m_deallocator(PerProcess<Heap>::get())
-    , m_allocator(PerProcess<Heap>::get(), m_deallocator)
+Environment::Environment()
+    : m_isBmallocEnabled(computeIsBmallocEnabled())
 {
 }
 
-NO_INLINE void* Cache::allocateSlowCaseNullCache(size_t size)
+bool Environment::computeIsBmallocEnabled()
 {
-    return PerThread<Cache>::getSlowCase()->allocator().allocate(size);
-}
-
-NO_INLINE void Cache::deallocateSlowCaseNullCache(void* object)
-{
-    PerThread<Cache>::getSlowCase()->deallocator().deallocate(object);
-}
-
-NO_INLINE void* Cache::reallocateSlowCaseNullCache(void* object, size_t newSize)
-{
-    return PerThread<Cache>::getSlowCase()->allocator().reallocate(object, newSize);
+    if (isMallocEnvironmentVariableSet())
+        return false;
+    if (isLibgmallocEnabled())
+        return false;
+    return true;
 }
 
 } // namespace bmalloc
