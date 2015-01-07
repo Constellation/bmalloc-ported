@@ -23,11 +23,25 @@
 */
 #ifndef HELPER_ALLOCATOR_H_
 #define HELPER_ALLOCATOR_H_
+#include <cstddef>
+#include <memory>
+#include <new>
+#include <utility>
 
 template<class T, class AllocatorTraits>
 class Allocator {
 public:
     typedef T value_type;
+    typedef T& reference;
+    typedef const T& const_reference;
+    typedef T* iterator;
+    typedef const T* const_iterator;
+    typedef T* pointer;
+    typedef const T* const_pointer;
+    typedef std::ptrdiff_t difference_type;
+    typedef std::size_t size_type;
+
+    typedef Allocator<T, AllocatorTraits> this_type;
 
     value_type* allocate(std::size_t n)
     {
@@ -43,6 +57,11 @@ public:
     Allocator(const Allocator&) noexcept { }
     template<class U> Allocator(const Allocator<U, AllocatorTraits>& ) noexcept { }
 
+    template <class U>
+    struct rebind {
+        typedef Allocator<U, AllocatorTraits> other;
+    };
+
     ~Allocator() noexcept { }
 
     template<class U> bool operator==(const Allocator<U, AllocatorTraits>&)
@@ -53,6 +72,19 @@ public:
     template<class U> bool operator!=(const Allocator<U, AllocatorTraits>&)
     {
         return false;
+    }
+
+    // For old GCCs.
+    template<class U>
+    void destroy(U* p)
+    {
+        p->~U();
+    }
+
+    template<class U, class... Args>
+    void construct(U* p, Args&&... args)
+    {
+        ::new ((void*)p) U(std::forward<Args>(args)...);
     }
 };
 
