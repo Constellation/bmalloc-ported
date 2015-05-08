@@ -6,13 +6,13 @@ os:
 matrix:
     include:
         - compiler: gcc
-          env: CC=gcc-4.6 CXX=g++-4.6     STD=c++0x BUILD_TYPE=Debug
+          env: COMPILER_CC=gcc-4.6 COMPILER_CXX=g++-4.6     STD=c++0x BUILD_TYPE=Debug
         - compiler: gcc
-          env: CC=gcc-4.6 CXX=g++-4.6     STD=c++0x BUILD_TYPE=Release
+          env: COMPILER_CC=gcc-4.6 COMPILER_CXX=g++-4.6     STD=c++0x BUILD_TYPE=Release
         - compiler: gcc
-          env: CC=gcc-4.8 CXX=g++-4.8     STD=c++11 BUILD_TYPE=Debug
+          env: COMPILER_CC=gcc-4.8 COMPILER_CXX=g++-4.8     STD=c++11 BUILD_TYPE=Debug
         - compiler: gcc
-          env: CC=gcc-4.8 CXX=g++-4.8     STD=c++11 BUILD_TYPE=Release
+          env: COMPILER_CC=gcc-4.8 COMPILER_CXX=g++-4.8     STD=c++11 BUILD_TYPE=Release
 
 before_install:
     - sudo add-apt-repository --yes ppa:ubuntu-toolchain-r/test
@@ -22,7 +22,7 @@ install:
     - sudo apt-get install -yqq gcc-4.8 g++-4.8
 
 before_script:
-    - cmake -H. -Bout -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX} -DCMAKE_CXX_FLAGS="-std=${STD}"
+    - cmake -H. -Bout -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCMAKE_C_COMPILER=${COMPILER_CC} -DCMAKE_CXX_COMPILER=${COMPILER_CXX} -DCMAKE_CXX_FLAGS="-std=${STD}"
 
 script:
     - make -C out
