@@ -6,9 +6,13 @@ os:
 matrix:
     include:
         - compiler: gcc
-            env: CC=gcc-4.8 CXX=g++-4.8 STD=c++11 BUILD_TYPE=Debug
+          env: CC=gcc-4.6 CXX=g++-4.6     STD=c++0x BUILD_TYPE=Debug
         - compiler: gcc
-            env: CC=gcc-4.8 CXX=g++-4.8 STD=c++11 BUILD_TYPE=Release
+          env: CC=gcc-4.6 CXX=g++-4.6     STD=c++0x BUILD_TYPE=Release
+        - compiler: gcc
+          env: CC=gcc-4.8 CXX=g++-4.8     STD=c++11 BUILD_TYPE=Debug
+        - compiler: gcc
+          env: CC=gcc-4.8 CXX=g++-4.8     STD=c++11 BUILD_TYPE=Release
 
 before_install:
     - sudo add-apt-repository --yes ppa:ubuntu-toolchain-r/test
