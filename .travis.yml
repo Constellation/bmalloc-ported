@@ -6,10 +6,6 @@ os:
 matrix:
     include:
         - compiler: gcc
-          env: COMPILER_CC=gcc-4.6 COMPILER_CXX=g++-4.6     STD=c++0x BUILD_TYPE=Debug
-        - compiler: gcc
-          env: COMPILER_CC=gcc-4.6 COMPILER_CXX=g++-4.6     STD=c++0x BUILD_TYPE=Release
-        - compiler: gcc
           env: COMPILER_CC=gcc-4.8 COMPILER_CXX=g++-4.8     STD=c++11 BUILD_TYPE=Debug
         - compiler: gcc
           env: COMPILER_CC=gcc-4.8 COMPILER_CXX=g++-4.8     STD=c++11 BUILD_TYPE=Release
