@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,31 +23,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "BoundaryTagInlines.h"
 #include "Heap.h"
 #include "LargeChunk.h"
+#include "LargeObject.h"
 #include "Line.h"
 #include "MediumChunk.h"
 #include "Page.h"
 #include "PerProcess.h"
 #include "SmallChunk.h"
-#include "XLargeChunk.h"
 #include <thread>
 
 namespace bmalloc {
 
-static inline void sleep(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds duration)
-{
-    if (duration == std::chrono::milliseconds(0))
-        return;
-    
-    lock.unlock();
-    std::this_thread::sleep_for(duration);
-    lock.lock();
-}
-
 Heap::Heap(std::lock_guard<StaticMutex>&)
-    : m_isAllocatingPages(false)
+    : m_largeObjects(Owner::Heap)
+    , m_isAllocatingPages(false)
     , m_scavenger(*this, &Heap::concurrentScavenge)
 {
     initializeLineMetadata();
@@ -93,62 +83,39 @@ void Heap::concurrentScavenge()
     std::unique_lock<StaticMutex> lock(PerProcess<Heap>::mutex());
     scavenge(lock, scavengeSleepDuration);
 }
-    
+
 void Heap::scavenge(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds sleepDuration)
 {
+    waitUntilFalse(lock, sleepDuration, m_isAllocatingPages);
+
     scavengeSmallPages(lock, sleepDuration);
     scavengeMediumPages(lock, sleepDuration);
-    scavengeLargeRanges(lock, sleepDuration);
+    scavengeLargeObjects(lock, sleepDuration);
 
     sleep(lock, sleepDuration);
 }
 
 void Heap::scavengeSmallPages(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds sleepDuration)
 {
-    while (1) {
-        if (m_isAllocatingPages) {
-            m_isAllocatingPages = false;
-
-            sleep(lock, sleepDuration);
-            continue;
-        }
-
-        if (!m_smallPages.size())
-            return;
+    while (m_smallPages.size()) {
         m_vmHeap.deallocateSmallPage(lock, m_smallPages.pop());
+        waitUntilFalse(lock, sleepDuration, m_isAllocatingPages);
     }
 }
 
 void Heap::scavengeMediumPages(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds sleepDuration)
 {
-    while (1) {
-        if (m_isAllocatingPages) {
-            m_isAllocatingPages = false;
-
-            sleep(lock, sleepDuration);
-            continue;
-        }
-
-        if (!m_mediumPages.size())
-            return;
+    while (m_mediumPages.size()) {
         m_vmHeap.deallocateMediumPage(lock, m_mediumPages.pop());
+        waitUntilFalse(lock, sleepDuration, m_isAllocatingPages);
     }
 }
 
-void Heap::scavengeLargeRanges(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds sleepDuration)
+void Heap::scavengeLargeObjects(std::unique_lock<StaticMutex>& lock, std::chrono::milliseconds sleepDuration)
 {
-    while (1) {
-        if (m_isAllocatingPages) {
-            m_isAllocatingPages = false;
-
-            sleep(lock, sleepDuration);
-            continue;
-        }
-
-        Range range = m_largeRanges.takeGreedy(vmPageSize);
-        if (!range)
-            return;
-        m_vmHeap.deallocateLargeRange(lock, range);
+    while (LargeObject largeObject = m_largeObjects.takeGreedy()) {
+        m_vmHeap.deallocateLargeObject(lock, largeObject);
+        waitUntilFalse(lock, sleepDuration, m_isAllocatingPages);
     }
 }
 
@@ -235,16 +202,13 @@ SmallPage* Heap::allocateSmallPage(std::lock_guard<StaticMutex>& lock, size_t si
             continue;
         return page;
     }
-    
-    m_isAllocatingPages = true;
 
     SmallPage* page = [this, sizeClass]() {
         if (m_smallPages.size())
             return m_smallPages.pop();
-        
-        SmallPage* page = m_vmHeap.allocateSmallPage();
-        vmAllocatePhysicalPages(page->begin()->begin(), vmPageSize);
-        return page;
+
+        m_isAllocatingPages = true;
+        return m_vmHeap.allocateSmallPage();
     }();
 
     page->setSizeClass(sizeClass);
@@ -260,16 +224,13 @@ MediumPage* Heap::allocateMediumPage(std::lock_guard<StaticMutex>& lock, size_t 
             continue;
         return page;
     }
-    
-    m_isAllocatingPages = true;
 
     MediumPage* page = [this, sizeClass]() {
         if (m_mediumPages.size())
             return m_mediumPages.pop();
-        
-        MediumPage* page = m_vmHeap.allocateMediumPage();
-        vmAllocatePhysicalPages(page->begin()->begin(), vmPageSize);
-        return page;
+
+        m_isAllocatingPages = true;
+        return m_vmHeap.allocateMediumPage();
     }();
 
     page->setSizeClass(sizeClass);
@@ -320,53 +281,124 @@ void Heap::deallocateMediumLine(std::lock_guard<StaticMutex>& lock, MediumLine* 
     }
 }
 
-void* Heap::allocateXLarge(std::lock_guard<StaticMutex>&, size_t size)
+void* Heap::allocateXLarge(std::lock_guard<StaticMutex>& lock, size_t alignment, size_t size)
 {
-    XLargeChunk* chunk = XLargeChunk::create(size);
-
-    BeginTag* beginTag = LargeChunk::beginTag(chunk->begin());
-    beginTag->setXLarge();
-    beginTag->setFree(false);
-    beginTag->setHasPhysicalPages(true);
-    
-    return chunk->begin();
+    void* result = tryAllocateXLarge(lock, alignment, size);
+    RELEASE_BASSERT(result);
+    return result;
 }
 
-void Heap::deallocateXLarge(std::lock_guard<StaticMutex>&, void* object)
+void* Heap::allocateXLarge(std::lock_guard<StaticMutex>& lock, size_t size)
 {
-    XLargeChunk* chunk = XLargeChunk::get(object);
-    XLargeChunk::destroy(chunk);
+    return allocateXLarge(lock, superChunkSize, size);
 }
 
-void* Heap::allocateLarge(std::lock_guard<StaticMutex>&, size_t size)
+void* Heap::tryAllocateXLarge(std::lock_guard<StaticMutex>&, size_t alignment, size_t size)
+{
+    BASSERT(isPowerOfTwo(alignment));
+    BASSERT(alignment >= superChunkSize);
+    BASSERT(size == roundUpToMultipleOf<xLargeAlignment>(size));
+
+    void* result = tryVMAllocate(alignment, size);
+    if (!result)
+        return nullptr;
+    m_xLargeObjects.push(Range(result, size));
+    return result;
+}
+
+Range& Heap::findXLarge(std::unique_lock<StaticMutex>&, void* object)
+{
+    for (auto& range : m_xLargeObjects) {
+        if (range.begin() != object)
+            continue;
+        return range;
+    }
+
+    RELEASE_BASSERT(false);
+    return *static_cast<Range*>(nullptr); // Silence compiler error.
+}
+
+void Heap::deallocateXLarge(std::unique_lock<StaticMutex>& lock, void* object)
+{
+    Range toDeallocate = m_xLargeObjects.pop(&findXLarge(lock, object));
+
+    lock.unlock();
+    vmDeallocate(toDeallocate.begin(), toDeallocate.size());
+    lock.lock();
+}
+
+void* Heap::allocateLarge(std::lock_guard<StaticMutex>&, LargeObject& largeObject, size_t size)
+{
+    BASSERT(largeObject.isFree());
+
+    if (largeObject.size() - size > largeMin) {
+        std::pair<LargeObject, LargeObject> split = largeObject.split(size);
+        largeObject = split.first;
+        m_largeObjects.insert(split.second);
+    }
+
+    largeObject.setFree(false);
+    return largeObject.begin();
+}
+
+void* Heap::allocateLarge(std::lock_guard<StaticMutex>& lock, size_t size)
 {
     BASSERT(size <= largeMax);
     BASSERT(size >= largeMin);
+    BASSERT(size == roundUpToMultipleOf<largeAlignment>(size));
     
-    m_isAllocatingPages = true;
+    LargeObject largeObject = m_largeObjects.take(size);
+    if (!largeObject) {
+        m_isAllocatingPages = true;
+        largeObject = m_vmHeap.allocateLargeObject(size);
+    }
 
-    Range range = m_largeRanges.take(size);
-    if (!range)
-        range = m_vmHeap.allocateLargeRange(size);
-    
-    Range leftover;
-    bool hasPhysicalPages;
-    BoundaryTag::allocate(size, range, leftover, hasPhysicalPages);
-
-    if (!!leftover)
-        m_largeRanges.insert(leftover);
-    
-    if (!hasPhysicalPages)
-        vmAllocatePhysicalPagesSloppy(range.begin(), range.size());
-
-    return range.begin();
+    return allocateLarge(lock, largeObject, size);
 }
 
-void Heap::deallocateLarge(std::lock_guard<StaticMutex>&, void* object)
+void* Heap::allocateLarge(std::lock_guard<StaticMutex>& lock, size_t alignment, size_t size, size_t unalignedSize)
 {
-    Range range = BoundaryTag::deallocate(object);
-    m_largeRanges.insert(range);
+    BASSERT(size <= largeMax);
+    BASSERT(size >= largeMin);
+    BASSERT(size == roundUpToMultipleOf<largeAlignment>(size));
+    BASSERT(unalignedSize <= largeMax);
+    BASSERT(unalignedSize >= largeMin);
+    BASSERT(unalignedSize == roundUpToMultipleOf<largeAlignment>(unalignedSize));
+    BASSERT(alignment <= largeChunkSize / 2);
+    BASSERT(alignment >= largeAlignment);
+    BASSERT(isPowerOfTwo(alignment));
+
+    LargeObject largeObject = m_largeObjects.take(alignment, size, unalignedSize);
+    if (!largeObject) {
+        m_isAllocatingPages = true;
+        largeObject = m_vmHeap.allocateLargeObject(alignment, size, unalignedSize);
+    }
+
+    size_t alignmentMask = alignment - 1;
+    if (test(largeObject.begin(), alignmentMask)) {
+        size_t prefixSize = roundUpToMultipleOf(alignment, largeObject.begin() + largeMin) - largeObject.begin();
+        std::pair<LargeObject, LargeObject> pair = largeObject.split(prefixSize);
+        m_largeObjects.insert(pair.first);
+        largeObject = pair.second;
+    }
+
+    return allocateLarge(lock, largeObject, size);
+}
+
+void Heap::deallocateLarge(std::lock_guard<StaticMutex>&, const LargeObject& largeObject)
+{
+    BASSERT(!largeObject.isFree());
+    largeObject.setFree(true);
+    
+    LargeObject merged = largeObject.merge();
+    m_largeObjects.insert(merged);
     m_scavenger.run();
+}
+
+void Heap::deallocateLarge(std::lock_guard<StaticMutex>& lock, void* object)
+{
+    LargeObject largeObject(object);
+    deallocateLarge(lock, largeObject);
 }
 
 } // namespace bmalloc

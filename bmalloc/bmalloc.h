@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,13 +24,35 @@
  */
 
 #include "Cache.h"
+#include "Heap.h"
+#include "PerProcess.h"
+#include "StaticMutex.h"
 
 namespace bmalloc {
 namespace api {
 
+// Returns null on failure.
+inline void* tryMalloc(size_t size)
+{
+    return Cache::tryAllocate(size);
+}
+
+// Crashes on failure.
 inline void* malloc(size_t size)
 {
     return Cache::allocate(size);
+}
+
+// Crashes on failure.
+inline void* memalign(size_t alignment, size_t size)
+{
+    return Cache::allocate(alignment, size);
+}
+
+// Crashes on failure.
+inline void* realloc(void* object, size_t newSize)
+{
+    return Cache::reallocate(object, newSize);
 }
 
 inline void free(void* object)
@@ -38,14 +60,17 @@ inline void free(void* object)
     Cache::deallocate(object);
 }
 
-inline void* realloc(void* object, size_t newSize)
-{
-    return Cache::reallocate(object, newSize);
-}
-    
-inline void scavenge()
+inline void scavengeThisThread()
 {
     Cache::scavenge();
+}
+
+inline void scavenge()
+{
+    scavengeThisThread();
+
+    std::unique_lock<StaticMutex> lock(PerProcess<Heap>::mutex());
+    PerProcess<Heap>::get()->scavenge(lock, std::chrono::milliseconds(0));
 }
 
 } // namespace api

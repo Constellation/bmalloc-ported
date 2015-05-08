@@ -45,8 +45,27 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     add_definitions("-fpermissive")
 endif()
 
-file(GLOB src "bmalloc/*.cpp")
-add_library(bmalloc STATIC ${src})
+set(bmalloc_SOURCES
+    bmalloc/Allocator.cpp
+    bmalloc/Cache.cpp
+    bmalloc/Deallocator.cpp
+    bmalloc/Environment.cpp
+    bmalloc/FreeList.cpp
+    bmalloc/Heap.cpp
+    bmalloc/ObjectType.cpp
+    bmalloc/SegregatedFreeList.cpp
+    bmalloc/StaticMutex.cpp
+    bmalloc/VMHeap.cpp
+    bmalloc/mbmalloc.cpp
+)
+
+if (CMAKE_HOST_APPLE)
+    list(APPEND bmalloc_SOURCES
+        bmalloc/Zone.cpp
+    )
+endif()
+
+add_library(bmalloc STATIC ${bmalloc_SOURCES})
 
 set(BMALLOC_LIBS ${CMAKE_THREAD_LIBS_INIT} bmalloc)
 include_directories(".")

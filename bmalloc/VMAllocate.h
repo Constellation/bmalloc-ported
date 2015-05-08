@@ -31,18 +31,19 @@
 #include "Sizes.h"
 #include "Syscall.h"
 #include <algorithm>
-#ifdef __APPLE__
-#include <mach/vm_statistics.h>
-#endif
 #include <sys/mman.h>
 #include <unistd.h>
 
+#if BOS(DARWIN)
+#include <mach/vm_statistics.h>
+#endif
+
 namespace bmalloc {
 
-#ifdef VM_MEMORY_TCMALLOC
+#if BOS(DARWIN)
 #define BMALLOC_VM_TAG VM_MAKE_TAG(VM_MEMORY_TCMALLOC)
 #else
-#define BMALLOC_VM_TAG (MAP_PRIVATE | MAP_ANON)
+#define BMALLOC_VM_TAG -1
 #endif
 
 inline size_t vmSize(size_t size)
@@ -72,11 +73,19 @@ inline void vmValidate(void* p, size_t vmSize)
     BASSERT(p == mask(p, ~(getpagesize() - 1)));
 }
 
-inline void* vmAllocate(size_t vmSize)
+inline void* tryVMAllocate(size_t vmSize)
 {
     vmValidate(vmSize);
     void* result = mmap(0, vmSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, BMALLOC_VM_TAG, 0);
-    RELEASE_BASSERT(result != MAP_FAILED);
+    if (result == MAP_FAILED)
+        return nullptr;
+    return result;
+}
+
+inline void* vmAllocate(size_t vmSize)
+{
+    void* result = tryVMAllocate(vmSize);
+    RELEASE_BASSERT(result);
     return result;
 }
 
@@ -89,13 +98,15 @@ inline void vmDeallocate(void* p, size_t vmSize)
 // Allocates vmSize bytes at a specified power-of-two alignment.
 // Use this function to create maskable memory regions.
 
-inline void* vmAllocate(size_t vmSize, size_t vmAlignment)
+inline void* tryVMAllocate(size_t vmAlignment, size_t vmSize)
 {
     vmValidate(vmSize);
     vmValidate(vmAlignment);
 
     size_t mappedSize = std::max(vmSize, vmAlignment) + vmAlignment;
-    char* mapped = static_cast<char*>(vmAllocate(mappedSize));
+    char* mapped = static_cast<char*>(tryVMAllocate(mappedSize));
+    if (!mapped)
+        return nullptr;
     char* mappedEnd = mapped + mappedSize;
 
     char* aligned = roundUpToMultipleOf(vmAlignment, mapped);
@@ -110,10 +121,17 @@ inline void* vmAllocate(size_t vmSize, size_t vmAlignment)
     return aligned;
 }
 
+inline void* vmAllocate(size_t vmAlignment, size_t vmSize)
+{
+    void* result = tryVMAllocate(vmAlignment, vmSize);
+    RELEASE_BASSERT(result);
+    return result;
+}
+
 inline void vmDeallocatePhysicalPages(void* p, size_t vmSize)
 {
     vmValidate(p, vmSize);
-#if defined(MADV_FREE_REUSABLE)
+#if BOS(DARWIN)
     SYSCALL(madvise(p, vmSize, MADV_FREE_REUSABLE));
 #else
     SYSCALL(madvise(p, vmSize, MADV_DONTNEED));
@@ -123,25 +141,23 @@ inline void vmDeallocatePhysicalPages(void* p, size_t vmSize)
 inline void vmAllocatePhysicalPages(void* p, size_t vmSize)
 {
     vmValidate(p, vmSize);
-#if defined(MADV_FREE_REUSE)
+#if BOS(DARWIN)
     SYSCALL(madvise(p, vmSize, MADV_FREE_REUSE));
 #else
-    SYSCALL(madvise(p, vmSize, MADV_WILLNEED));
+    SYSCALL(madvise(p, vmSize, MADV_NORMAL));
 #endif
 }
 
-// Trims requests that are un-page-aligned. NOTE: size must be at least a page.
+// Trims requests that are un-page-aligned.
 inline void vmDeallocatePhysicalPagesSloppy(void* p, size_t size)
 {
-    BASSERT(size >= vmPageSize);
-
     char* begin = roundUpToMultipleOf<vmPageSize>(static_cast<char*>(p));
     char* end = roundDownToMultipleOf<vmPageSize>(static_cast<char*>(p) + size);
 
-    Range range(begin, end - begin);
-    if (!range)
+    if (begin >= end)
         return;
-    vmDeallocatePhysicalPages(range.begin(), range.size());
+
+    vmDeallocatePhysicalPages(begin, end - begin);
 }
 
 // Expands requests that are un-page-aligned. NOTE: Allocation must proceed left-to-right.
@@ -150,10 +166,10 @@ inline void vmAllocatePhysicalPagesSloppy(void* p, size_t size)
     char* begin = roundUpToMultipleOf<vmPageSize>(static_cast<char*>(p));
     char* end = roundUpToMultipleOf<vmPageSize>(static_cast<char*>(p) + size);
 
-    Range range(begin, end - begin);
-    if (!range)
+    if (begin >= end)
         return;
-    vmAllocatePhysicalPages(range.begin(), range.size());
+
+    vmAllocatePhysicalPages(begin, end - begin);
 }
 
 } // namespace bmalloc

@@ -30,7 +30,6 @@
 #include "VMAllocate.h"
 #include <cstddef>
 #include <cstring>
-#include <string>
 
 namespace bmalloc {
 
@@ -89,7 +88,8 @@ inline Vector<T>::Vector()
 template<typename T>
 Vector<T>::~Vector()
 {
-    vmDeallocate(m_buffer, vmSize(m_capacity * sizeof(T)));
+    if (m_buffer)
+        vmDeallocate(m_buffer, vmSize(m_capacity * sizeof(T)));
 }
 
 template<typename T>
@@ -149,7 +149,7 @@ void Vector<T>::reallocateBuffer(size_t newCapacity)
     size_t vmSize = bmalloc::vmSize(newCapacity * sizeof(T));
     T* newBuffer = static_cast<T*>(vmAllocate(vmSize));
     if (m_buffer) {
-        memcpy(newBuffer, m_buffer, m_size * sizeof(T));
+        std::memcpy(newBuffer, m_buffer, m_size * sizeof(T));
         vmDeallocate(m_buffer, bmalloc::vmSize(m_capacity * sizeof(T)));
     }
 

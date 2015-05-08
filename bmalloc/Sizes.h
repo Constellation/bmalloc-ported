@@ -76,12 +76,13 @@ namespace Sizes {
     static const size_t largeChunkMask = ~(largeChunkSize - 1ul);
 
     static const size_t largeAlignment = 64;
-    static const size_t largeAlignmentShift = 6;
-    static_assert(1 << largeAlignmentShift == largeAlignment, "largeAlignmentShift be log2(largeAlignment).");
     static const size_t largeMax = largeChunkSize * 99 / 100; // Plenty of room for metadata.
     static const size_t largeMin = mediumMax;
+    
+    static const size_t xLargeAlignment = vmPageSize;
 
-    static const size_t segregatedFreeListSearchDepth = 16;
+    static const size_t freeListSearchDepth = 16;
+    static const size_t freeListGrowFactor = 2;
 
     static const uintptr_t typeMask = (superChunkSize - 1) & ~((superChunkSize / 4) - 1); // 4 taggable chunks
     static const uintptr_t smallType = (superChunkSize + smallChunkOffset) & typeMask;
@@ -98,7 +99,7 @@ namespace Sizes {
     inline size_t sizeClass(size_t size)
     {
         static const size_t sizeClassMask = (mediumMax / alignment) - 1;
-        return mask((size - 1ul) / alignment, sizeClassMask);
+        return mask((size - 1) / alignment, sizeClassMask);
     }
 
     inline size_t objectSize(size_t sizeClass)

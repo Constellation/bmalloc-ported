@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,37 +23,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef BAssert_h
-#define BAssert_h
+#ifndef Owner_h
+#define Owner_h
 
-#define BASSERT_IMPL(x) do { \
-    if (!(x)) \
-        *(int*)0xbbadbeef = 0; \
-} while(0);
+namespace bmalloc {
 
-#define RELEASE_BASSERT(x) BASSERT_IMPL(x)
+enum class Owner : unsigned {
+    VMHeap,
+    Heap
+};
 
-#define UNUSED(x) (void)x
+} // namespace bmalloc
 
-// ===== Release build =====
-
-#if defined(NDEBUG)
-
-#define BASSERT(x)
-
-#define IF_DEBUG(x)
-
-#endif // defined(NDEBUG)
-
-
-// ===== Debug build =====
-
-#if !defined(NDEBUG)
-
-#define BASSERT(x) BASSERT_IMPL(x)
-
-#define IF_DEBUG(x) x
-
-#endif // !defined(NDEBUG)
-
-#endif // BAssert_h
+#endif // Owner_h
