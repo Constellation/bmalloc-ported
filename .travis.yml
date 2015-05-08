@@ -15,7 +15,7 @@ before_install:
     - sudo apt-get update -yqq
 
 install:
-    - sudo apt-get install -yqq libc6-dev
+    - sudo apt-get install -yqq libc6-dev gnulib
 
 before_script:
     - "cmake -H. -Bout -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX"
