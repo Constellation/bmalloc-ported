@@ -77,6 +77,7 @@ ExternalProject_Add(project-jemalloc
     URL http://www.canonware.com/download/jemalloc/jemalloc-3.6.0.tar.bz2
     CONFIGURE_COMMAND <SOURCE_DIR>/configure CC=${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1} --prefix=<INSTALL_DIR> --with-private-namespace=je_internal_ --with-jemalloc-prefix=je_ --enable-cc-silence
     INSTALL_DIR ${PROJECT_BINARY_DIR}
+    BUILD_BYPRODUCTS ${PROJECT_BINARY_DIR}/lib/libjemalloc_pic.a
 )
 add_library(jemalloc STATIC IMPORTED GLOBAL)
 set_target_properties(jemalloc PROPERTIES IMPORTED_LOCATION ${PROJECT_BINARY_DIR}/lib/libjemalloc_pic.a)
